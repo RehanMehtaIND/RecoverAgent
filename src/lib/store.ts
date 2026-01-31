@@ -6,6 +6,13 @@ type Job = {
   prUrl?: string
   error?: string
   createdAt: number
+  retries?: number
+  diffStat?: string
+  verifyLog?: string
+  patchPreview?: string
+  prBody?: string
+  bundle?: string
+  bundleFiles?: string[]
 }
 
 const g = globalThis as any
@@ -14,7 +21,7 @@ const jobs: Map<string, Job> = g.__selfhealJobs
 
 export function createJob(): Job {
   const id = Math.random().toString(16).slice(2) + Date.now().toString(16)
-  const job: Job = { id, status: "queued", step: "queued", logs: [], createdAt: Date.now() }
+  const job: Job = { id, status: "queued", step: "queued", logs: [], createdAt: Date.now(), retries: 0 }
   jobs.set(id, job)
   return job
 }

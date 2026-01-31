@@ -2,6 +2,19 @@ function sleep(ms: number) {
   return new Promise(resolve => setTimeout(resolve, ms))
 }
 
+let queue: Promise<void> = Promise.resolve()
+let lastCallAt = 0
+
+async function schedule(minDelayMs: number) {
+  queue = queue.then(async () => {
+    const now = Date.now()
+    const waitMs = Math.max(0, minDelayMs - (now - lastCallAt))
+    if (waitMs > 0) await sleep(waitMs)
+    lastCallAt = Date.now()
+  })
+  await queue
+}
+
 function getRetryDelayMs(r: Response, attempt: number) {
   const retryAfter = r.headers.get("retry-after")
   const retryAfterMs = retryAfter ? Number(retryAfter) * 1000 : 0
@@ -13,15 +26,18 @@ function getRetryDelayMs(r: Response, attempt: number) {
 export async function openaiResponses(apiKey: string, model: string, input: any, temperature = 0.2) {
   const maxRetries = 4
   let lastError = ""
+  const supportsTemperature = !model.startsWith("o")
+  const minDelayMs = Number(process.env.OPENAI_MIN_DELAY_MS || 25000)
 
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    await schedule(minDelayMs)
     const r = await fetch("https://api.openai.com/v1/responses", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${apiKey}`
       },
-      body: JSON.stringify({ model, input, temperature })
+      body: JSON.stringify(supportsTemperature ? { model, input, temperature } : { model, input })
     })
 
     const text = await r.text()

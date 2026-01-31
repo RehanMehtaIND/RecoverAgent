@@ -140,6 +140,50 @@ Return ONLY valid JSON:
 Rules:
 - Only include files from this allowed list:
 ${allowedFiles.join("\n")}
+- You MUST include at least one file in the response.
+- Use exact content style from the repo (line breaks, indentation).
+- Do not add commentary or markdown.`
+    }
+  ]
+}
+
+function fileRewriteStrictInput(
+  bundle: string,
+  planJson: string,
+  allowedFiles: string[],
+  errorText: string,
+  extraContext: string
+) {
+  return [
+    {
+      role: "system",
+      content:
+        "You are an automated patch generator. You MUST return a non-empty file rewrite payload."
+    },
+    {
+      role: "user",
+      content:
+`Planner JSON:
+${planJson}
+
+Context:
+${bundle}
+
+Previous apply error:
+${errorText}
+
+${extraContext}
+
+Return ONLY valid JSON with at least one file:
+{
+  "files": [
+    { "path": "relative/path/from/repo", "content": "full file content" }
+  ]
+}
+
+Rules:
+- Only include files from this allowed list:
+${allowedFiles.join("\n")}
 - Use exact content style from the repo (line breaks, indentation).
 - Do not add commentary or markdown.`
     }
@@ -233,6 +277,7 @@ function safeJson(s: string) {
 export async function runHealJob(args: {
   apiKey: string
   model: string
+  temperature: number
   githubToken: string
   owner: string
   repo: string
@@ -243,7 +288,8 @@ export async function runHealJob(args: {
   verifyCmd: string
   onLog: (s: string) => void
 }) {
-  const { apiKey, model, githubToken, owner, repo, runId, headSha, logText, verifyCmd, onLog, base } = args
+  const { apiKey, model, temperature, githubToken, owner, repo, runId, headSha, logText, verifyCmd, onLog, base } = args
+  const clip = (s: string, max = 8000) => (s.length > max ? `${s.slice(0, max)}\n...[truncated]` : s)
 
   onLog("Creating sandbox checkout")
   const dir = makeTempDir()
@@ -255,19 +301,19 @@ export async function runHealJob(args: {
   const { bundle, files } = buildBundle(dir, logText)
 
   onLog("Planning fix")
-  const planRaw = await openaiResponses(apiKey, model, plannerInput(bundle), 0.2)
+  const planRaw = await openaiResponses(apiKey, model, plannerInput(bundle), temperature)
   const plan = safeJson(planRaw)
   if (!plan) throw new Error("Planner returned invalid JSON")
 
   onLog("Generating patch (unified diff)")
-  let patchRaw = await openaiResponses(apiKey, model, patcherInput(bundle, JSON.stringify(plan), files), 0.1)
+  let patchRaw = await openaiResponses(apiKey, model, patcherInput(bundle, JSON.stringify(plan), files), temperature)
   if (!isLikelyUnifiedDiff(patchRaw)) {
     onLog("Patch invalid; retrying with stricter format")
     patchRaw = await openaiResponses(
       apiKey,
       model,
       patcherRetryInput(bundle, JSON.stringify(plan), files, "Invalid diff format", "FILE_SNIPPET: none"),
-      0.1
+      temperature
     )
     if (!isLikelyUnifiedDiff(patchRaw)) {
       throw new Error("Patch invalid after retry; not a unified diff.")
@@ -289,7 +335,7 @@ export async function runHealJob(args: {
       apiKey,
       model,
       patcherRetryInput(bundle, JSON.stringify(plan), files, msg, snippet),
-      0.1
+      temperature
     )
     if (!isLikelyUnifiedDiff(patchRaw)) {
       throw new Error("Patch invalid after retry; not a unified diff.")
@@ -304,11 +350,25 @@ export async function runHealJob(args: {
         apiKey,
         model,
         fileRewriteInput(bundle, JSON.stringify(plan), files, retryMsg, retrySnippet),
-        0.1
+        temperature
       )
       const rewriteJson = safeJson(rewriteRaw)
       if (!rewriteJson || !Array.isArray(rewriteJson.files)) {
         throw new Error("File rewrite failed; invalid JSON output.")
+      }
+      if (rewriteJson.files.length === 0) {
+        const strictRaw = await openaiResponses(
+          apiKey,
+          model,
+          fileRewriteStrictInput(bundle, JSON.stringify(plan), files, retryMsg, retrySnippet),
+          temperature
+        )
+        const strictJson = safeJson(strictRaw)
+        if (!strictJson || !Array.isArray(strictJson.files) || strictJson.files.length === 0) {
+          throw new Error("File rewrite payload is empty.")
+        }
+        applyFileRewrites(dir, strictJson.files, new Set(files))
+        return
       }
       applyFileRewrites(dir, rewriteJson.files, new Set(files))
     }
@@ -325,7 +385,7 @@ export async function runHealJob(args: {
   pushBranch(dir, githubToken, owner, repo, branch)
 
   onLog("Writing PR body")
-  const prBody = await openaiResponses(apiKey, model, prBodyInput(bundle, JSON.stringify(plan), stat, verifyLog), 0.2)
+  const prBody = await openaiResponses(apiKey, model, prBodyInput(bundle, JSON.stringify(plan), stat, verifyLog), temperature)
 
   onLog("Opening PR")
   const pr = await ghFetch(githubToken, `https://api.github.com/repos/${owner}/${repo}/pulls`, {
@@ -339,5 +399,13 @@ export async function runHealJob(args: {
     })
   })
 
-  return { prUrl: pr.html_url as string }
+  return {
+    prUrl: pr.html_url as string,
+    diffStat: stat,
+    verifyLog: clip(verifyLog),
+    patchPreview: clip(patchRaw, 12000),
+    prBody: clip(prBody, 12000),
+    bundle: clip(bundle, 12000),
+    bundleFiles: files
+  }
 }

@@ -12,8 +12,12 @@ export async function POST(req: Request) {
   const runId = Number(body.runId || 0)
 
   const apiKey = process.env.OPENAI_API_KEY || ""
-  const model = process.env.OPENAI_MODEL || "gpt-4.1-mini"
+  const model = body.model || process.env.OPENAI_MODEL || "gpt-4.1-mini"
+  const temperatureRaw = body.temperature ?? process.env.OPENAI_TEMPERATURE ?? 0.2
+  const temperature = Math.max(0, Math.min(1, Number(temperatureRaw) || 0.2))
   const verifyCmd = process.env.VERIFY_CMD || "npm test"
+  const maxRateRetries = Number(process.env.HEAL_RATE_RETRIES || 2)
+  const retryDelayMs = Number(process.env.HEAL_RATE_RETRY_MS || 25000)
 
   if (!owner || !repo) return NextResponse.json({ error: "Missing owner/repo" }, { status: 400 })
   if (!token) return NextResponse.json({ error: "Missing GitHub token" }, { status: 400 })
@@ -25,8 +29,9 @@ export async function POST(req: Request) {
   setJob(job.id, { status: "running", step: "fetching run" })
   pushLog(job.id, "Fetching run metadata")
 
-  ;(async () => {
+  const attemptHeal = async (attempt: number) => {
     try {
+      setJob(job.id, { retries: attempt })
       const run = await getRun(token, owner, repo, runId)
       const sha = String(run.head_sha || "")
       setJob(job.id, { step: "fetching logs" })
@@ -40,6 +45,7 @@ export async function POST(req: Request) {
       const res = await runHealJob({
         apiKey,
         model,
+        temperature,
         githubToken: token,
         owner,
         repo,
@@ -54,12 +60,34 @@ export async function POST(req: Request) {
         }
       })
 
-      setJob(job.id, { status: "done", step: "done", prUrl: res.prUrl })
+      setJob(job.id, {
+        status: "done",
+        step: "done",
+        prUrl: res.prUrl,
+        diffStat: res.diffStat,
+        verifyLog: res.verifyLog,
+        patchPreview: res.patchPreview,
+        prBody: res.prBody,
+        bundle: res.bundle,
+        bundleFiles: res.bundleFiles
+      })
       pushLog(job.id, "Done")
     } catch (e: any) {
-      setJob(job.id, { status: "error", step: "error", error: e?.message || "Failed" })
-      pushLog(job.id, `Error: ${e?.message || "Failed"}`)
+      const msg = e?.message || "Failed"
+      const isRateLimit = /rate limit/i.test(String(msg))
+      if (isRateLimit && attempt < maxRateRetries) {
+        setJob(job.id, { status: "queued", step: "rate limited" })
+        pushLog(job.id, `Rate limited. Retrying in ${Math.round(retryDelayMs / 1000)}s (attempt ${attempt + 1}/${maxRateRetries}).`)
+        setTimeout(() => attemptHeal(attempt + 1), retryDelayMs)
+        return
+      }
+      setJob(job.id, { status: "error", step: "error", error: msg })
+      pushLog(job.id, `Error: ${msg}`)
     }
+  }
+
+  ;(async () => {
+    await attemptHeal(0)
   })()
 
   return NextResponse.json({ jobId: job.id })
