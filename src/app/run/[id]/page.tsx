@@ -6,7 +6,11 @@ import { useParams, useSearchParams } from "next/navigation"
 export default function RunDetail() {
   const routeParams = useParams<{ id: string }>()
   const searchParams = useSearchParams()
-  const search = useMemo(() => new URLSearchParams(searchParams?.toString() || ""), [searchParams])
+  const [isMounted, setIsMounted] = useState(false)
+  const search = useMemo(
+    () => new URLSearchParams(isMounted ? (searchParams?.toString() || "") : ""),
+    [isMounted, searchParams]
+  )
   const runIdParam = routeParams?.id
   const runId = Array.isArray(runIdParam) ? runIdParam[0] : runIdParam || ""
   const owner = search.get("owner") || ""
@@ -19,6 +23,10 @@ export default function RunDetail() {
   const [loading, setLoading] = useState(true)
   const [err, setErr] = useState("")
   const [starting, setStarting] = useState(false)
+
+  useEffect(() => {
+    setIsMounted(true)
+  }, [])
 
   useEffect(() => {
     const go = async () => {
@@ -36,8 +44,8 @@ export default function RunDetail() {
       }
       setLoading(false)
     }
-    if (owner && repo) go()
-  }, [runId, owner, repo, token])
+    if (isMounted && owner && repo) go()
+  }, [isMounted, runId, owner, repo, token])
 
   const startHeal = async () => {
     setStarting(true)

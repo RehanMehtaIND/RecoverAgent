@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useMemo, useState } from "react"
+import { useSearchParams } from "next/navigation"
 
 type Run = {
   id: number
@@ -13,7 +14,12 @@ type Run = {
 }
 
 export default function RunsPage() {
-  const params = useMemo(() => new URLSearchParams(typeof window !== "undefined" ? window.location.search : ""), [])
+  const searchParams = useSearchParams()
+  const [isMounted, setIsMounted] = useState(false)
+  const params = useMemo(
+    () => new URLSearchParams(isMounted ? (searchParams?.toString() || "") : ""),
+    [isMounted, searchParams]
+  )
   const owner = params.get("owner") || ""
   const repo = params.get("repo") || ""
   const base = params.get("base") || "main"
@@ -22,6 +28,10 @@ export default function RunsPage() {
   const [runs, setRuns] = useState<Run[]>([])
   const [loading, setLoading] = useState(true)
   const [err, setErr] = useState("")
+
+  useEffect(() => {
+    setIsMounted(true)
+  }, [])
 
   useEffect(() => {
     const go = async () => {
@@ -37,8 +47,8 @@ export default function RunsPage() {
       }
       setLoading(false)
     }
-    if (owner && repo) go()
-  }, [owner, repo, token])
+    if (isMounted && owner && repo) go()
+  }, [isMounted, owner, repo, token])
 
   return (
     <div style={{ display: "grid", gap: 12 }}>

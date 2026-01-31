@@ -15,7 +15,11 @@ type Job = {
 export default function JobPage() {
   const routeParams = useParams<{ id: string }>()
   const searchParams = useSearchParams()
-  const search = useMemo(() => new URLSearchParams(searchParams?.toString() || ""), [searchParams])
+  const [isMounted, setIsMounted] = useState(false)
+  const search = useMemo(
+    () => new URLSearchParams(isMounted ? (searchParams?.toString() || "") : ""),
+    [isMounted, searchParams]
+  )
   const jobIdParam = routeParams?.id
   const jobId = Array.isArray(jobIdParam) ? jobIdParam[0] : jobIdParam || ""
   const owner = search.get("owner") || ""
@@ -26,6 +30,10 @@ export default function JobPage() {
   const [job, setJob] = useState<Job | null>(null)
 
   useEffect(() => {
+    setIsMounted(true)
+  }, [])
+
+  useEffect(() => {
     let t: any
     const poll = async () => {
       const r = await fetch(`/api/heal/status?jobId=${encodeURIComponent(jobId)}&owner=${encodeURIComponent(owner)}&repo=${encodeURIComponent(repo)}&base=${encodeURIComponent(base)}&token=${encodeURIComponent(token)}`)
@@ -34,9 +42,9 @@ export default function JobPage() {
       const done = j?.job?.status === "done" || j?.job?.status === "error"
       if (!done) t = setTimeout(poll, 1200)
     }
-    poll()
+    if (isMounted && jobId) poll()
     return () => clearTimeout(t)
-  }, [jobId, owner, repo, base, token])
+  }, [isMounted, jobId, owner, repo, base, token])
 
   return (
     <div style={{ display: "grid", gap: 12 }}>
