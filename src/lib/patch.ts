@@ -24,11 +24,16 @@ export function applyPatch(cwd: string, diffText: string) {
   if (!normalized) {
     throw new Error("Patch is empty or invalid; no diff content found.")
   }
-  fs.writeFileSync(p, normalized)
+  const cleaned = normalized
+    .split("\n")
+    .map(line => line.replace(/[ \t]+$/g, ""))
+    .join("\n")
+  fs.writeFileSync(p, cleaned)
   try {
     const attempts = [
-      "git apply --3way --whitespace=fix --recount .selfheal.patch",
-      "git apply --3way --whitespace=fix --recount --unidiff-zero .selfheal.patch"
+      "git apply --whitespace=fix --recount .selfheal.patch",
+      "git apply --whitespace=fix --recount --ignore-whitespace .selfheal.patch",
+      "git apply --whitespace=fix --recount --unidiff-zero .selfheal.patch"
     ]
     let lastErr = ""
     for (const cmd of attempts) {

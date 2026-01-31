@@ -15,7 +15,8 @@ function selectRelevantFilesFromLog(logText: string, cwd: string) {
   const hits = new Set<string>()
   const patterns = [
     /File "([^"]+)"/g,
-    /(\S+\.(js|ts|py|go|java|rb|php)):\d+/g
+    /(\S+\.(js|ts|tsx|jsx|py|go|java|rb|php)):\d+/g,
+    /(\b[\w./-]+\.(js|ts|tsx|jsx|json|html|css|md|txt))\b/g
   ]
   for (const re of patterns) {
     let m: any
@@ -31,6 +32,14 @@ function selectRelevantFilesFromLog(logText: string, cwd: string) {
   return Array.from(hits).slice(0, 12)
 }
 
+function listRepoFiles(cwd: string) {
+  try {
+    return sh("git ls-files", cwd).split("\n").filter(Boolean)
+  } catch {
+    return []
+  }
+}
+
 export function buildBundle(cwd: string, logText: string) {
   const head = sh("git rev-parse HEAD", cwd)
   const msg = sh("git log -1 --pretty=%B", cwd)
@@ -42,7 +51,16 @@ export function buildBundle(cwd: string, logText: string) {
   }
 
   const rel = selectRelevantFilesFromLog(logText, cwd)
-  const files = Array.from(new Set([...rel, ...changed])).slice(0, 18)
+  let files = Array.from(new Set([...rel, ...changed]))
+
+  if (files.length === 0) {
+    const repoFiles = listRepoFiles(cwd)
+    const preferred = repoFiles.filter(p => p.startsWith("src/") || p.startsWith("tests/"))
+    const roots = repoFiles.filter(p => ["package.json", "README.md"].includes(p))
+    files = Array.from(new Set([...roots, ...preferred])).slice(0, 12)
+  }
+
+  files = files.slice(0, 18)
 
   const blobs = files.map(p => `--- ${p} ---\n${readFileSafe(`${cwd}/${p}`)}`).join("\n\n")
 

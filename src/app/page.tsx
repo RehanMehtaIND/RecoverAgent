@@ -19,7 +19,7 @@ export default function Home() {
         <input value={owner} onChange={e => setOwner(e.target.value)} placeholder="owner" style={inp} />
         <input value={repo} onChange={e => setRepo(e.target.value)} placeholder="repo" style={inp} />
         <input value={base} onChange={e => setBase(e.target.value)} placeholder="base branch (e.g. main)" style={inp} />
-        <input value={token} onChange={e => setToken(e.target.value)} placeholder="GitHub token (optional)" style={inp} />
+        <input type="password" value={token} onChange={e => setToken(e.target.value)} placeholder="GitHub token (optional)" style={inp} />
       </div>
 
       <a

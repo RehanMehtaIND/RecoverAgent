@@ -1,101 +1,10 @@
-"use client"
-
-import { useEffect, useMemo, useState } from "react"
-import { useParams, useSearchParams } from "next/navigation"
-
-type Job = {
-  id: string
-  status: string
-  step: string
-  prUrl?: string
-  error?: string
-  logs?: string[]
-}
+import { Suspense } from "react"
+import JobClient from "./JobClient"
 
 export default function JobPage() {
-  const routeParams = useParams<{ id: string }>()
-  const searchParams = useSearchParams()
-  const [isMounted, setIsMounted] = useState(false)
-  const search = useMemo(
-    () => new URLSearchParams(isMounted ? (searchParams?.toString() || "") : ""),
-    [isMounted, searchParams]
-  )
-  const jobIdParam = routeParams?.id
-  const jobId = Array.isArray(jobIdParam) ? jobIdParam[0] : jobIdParam || ""
-  const owner = search.get("owner") || ""
-  const repo = search.get("repo") || ""
-  const base = search.get("base") || "main"
-  const token = search.get("token") || ""
-
-  const [job, setJob] = useState<Job | null>(null)
-
-  useEffect(() => {
-    setIsMounted(true)
-  }, [])
-
-  useEffect(() => {
-    let t: any
-    const poll = async () => {
-      const r = await fetch(`/api/heal/status?jobId=${encodeURIComponent(jobId)}&owner=${encodeURIComponent(owner)}&repo=${encodeURIComponent(repo)}&base=${encodeURIComponent(base)}&token=${encodeURIComponent(token)}`)
-      const j = await r.json()
-      if (r.ok) setJob(j.job)
-      const done = j?.job?.status === "done" || j?.job?.status === "error"
-      if (!done) t = setTimeout(poll, 1200)
-    }
-    if (isMounted && jobId) poll()
-    return () => clearTimeout(t)
-  }, [isMounted, jobId, owner, repo, base, token])
-
   return (
-    <div style={{ display: "grid", gap: 12 }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
-        <h1 style={{ margin: 0, fontSize: 22 }}>Job {jobId}</h1>
-        <a href={`/runs?owner=${encodeURIComponent(owner)}&repo=${encodeURIComponent(repo)}&base=${encodeURIComponent(base)}&token=${encodeURIComponent(token)}`} style={{ color: "#aab" }}>back</a>
-      </div>
-
-      {!job && <div style={{ opacity: 0.8 }}>Loading…</div>}
-
-      {job && (
-        <>
-          <div style={card}>
-            <div style={{ display: "grid", gap: 6 }}>
-              <div>Status: <b>{job.status}</b></div>
-              <div>Step: <b>{job.step}</b></div>
-              {job.prUrl && (
-                <div>
-                  PR: <a href={job.prUrl} target="_blank" style={{ color: "#cfd3ff" }}>{job.prUrl}</a>
-                </div>
-              )}
-              {job.error && <div style={{ color: "#ff9a9a" }}>{job.error}</div>}
-            </div>
-          </div>
-
-          <div style={{ display: "grid", gap: 8 }}>
-            <div style={{ opacity: 0.85, fontWeight: 700 }}>Timeline</div>
-            <div style={{ display: "grid", gap: 8 }}>
-              {(job.logs || []).map((x, i) => (
-                <div key={i} style={logLine}>{x}</div>
-              ))}
-            </div>
-          </div>
-        </>
-      )}
-    </div>
+    <Suspense fallback={<div style={{ opacity: 0.8 }}>Loading…</div>}>
+      <JobClient />
+    </Suspense>
   )
-}
-
-const card: React.CSSProperties = {
-  border: "1px solid #222",
-  borderRadius: 14,
-  padding: 14,
-  background: "#0e0e16"
-}
-
-const logLine: React.CSSProperties = {
-  border: "1px solid #222",
-  borderRadius: 12,
-  padding: 10,
-  background: "#0a0a12",
-  fontSize: 12,
-  opacity: 0.95
 }

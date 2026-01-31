@@ -59,7 +59,8 @@ Rules:
 ${allowedFiles.join("\n")}
 - Never disable or skip tests.
 - Keep style consistent with repo.
-- Patch must directly address evidence in logs.`
+- Patch must directly address evidence in logs.
+- Preserve original line breaks and formatting; do not compress multiple statements onto one line.`
     }
   ]
 }
@@ -102,6 +103,49 @@ ${allowedFiles.join("\n")}
   ]
 }
 
+function fileRewriteInput(
+  bundle: string,
+  planJson: string,
+  allowedFiles: string[],
+  errorText: string,
+  extraContext: string
+) {
+  return [
+    {
+      role: "system",
+      content:
+        "You are an automated patch generator. Unified diff failed. Return ONLY JSON with full file contents."
+    },
+    {
+      role: "user",
+      content:
+`Planner JSON:
+${planJson}
+
+Context:
+${bundle}
+
+Previous apply error:
+${errorText}
+
+${extraContext}
+
+Return ONLY valid JSON:
+{
+  "files": [
+    { "path": "relative/path/from/repo", "content": "full file content" }
+  ]
+}
+
+Rules:
+- Only include files from this allowed list:
+${allowedFiles.join("\n")}
+- Use exact content style from the repo (line breaks, indentation).
+- Do not add commentary or markdown.`
+    }
+  ]
+}
+
 function isLikelyUnifiedDiff(text: string) {
   const t = text.trim()
   if (!t) return false
@@ -109,6 +153,25 @@ function isLikelyUnifiedDiff(text: string) {
   const hasPlusHeader = /^\+\+\+\s+\S+/m.test(t)
   const hasHunk = /^@@/m.test(t)
   return hasFileHeader && hasPlusHeader && hasHunk
+}
+
+function applyFileRewrites(cwd: string, files: { path: string; content: string }[], allowed: Set<string>) {
+  if (!Array.isArray(files) || files.length === 0) {
+    throw new Error("File rewrite payload is empty.")
+  }
+  for (const file of files) {
+    if (!file || typeof file.path !== "string" || typeof file.content !== "string") {
+      throw new Error("Invalid file rewrite entry.")
+    }
+    if (!allowed.has(file.path)) {
+      throw new Error(`File rewrite path not allowed: ${file.path}`)
+    }
+    const abs = path.join(cwd, file.path)
+    if (!fs.existsSync(abs)) {
+      throw new Error(`File not found for rewrite: ${file.path}`)
+    }
+    fs.writeFileSync(abs, file.content)
+  }
 }
 
 function extractSnippetFromError(cwd: string, errorText: string) {
@@ -231,7 +294,24 @@ export async function runHealJob(args: {
     if (!isLikelyUnifiedDiff(patchRaw)) {
       throw new Error("Patch invalid after retry; not a unified diff.")
     }
-    applyPatch(dir, patchRaw)
+    try {
+      applyPatch(dir, patchRaw)
+    } catch (retryError: any) {
+      const retryMsg = (retryError?.message || "Patch apply failed").toString()
+      const retrySnippet = extractSnippetFromError(dir, retryMsg)
+      onLog("Patch apply failed again; attempting full-file rewrite")
+      const rewriteRaw = await openaiResponses(
+        apiKey,
+        model,
+        fileRewriteInput(bundle, JSON.stringify(plan), files, retryMsg, retrySnippet),
+        0.1
+      )
+      const rewriteJson = safeJson(rewriteRaw)
+      if (!rewriteJson || !Array.isArray(rewriteJson.files)) {
+        throw new Error("File rewrite failed; invalid JSON output.")
+      }
+      applyFileRewrites(dir, rewriteJson.files, new Set(files))
+    }
   }
 
   onLog(`Verifying: ${verifyCmd}`)
