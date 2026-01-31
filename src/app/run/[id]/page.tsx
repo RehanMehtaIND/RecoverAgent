@@ -1,9 +1,14 @@
 "use client"
 
 import { useEffect, useMemo, useState } from "react"
+import { useParams, useSearchParams } from "next/navigation"
 
-export default function RunDetail({ params }: { params: { id: string } }) {
-  const search = useMemo(() => new URLSearchParams(typeof window !== "undefined" ? window.location.search : ""), [])
+export default function RunDetail() {
+  const routeParams = useParams<{ id: string }>()
+  const searchParams = useSearchParams()
+  const search = useMemo(() => new URLSearchParams(searchParams?.toString() || ""), [searchParams])
+  const runIdParam = routeParams?.id
+  const runId = Array.isArray(runIdParam) ? runIdParam[0] : runIdParam || ""
   const owner = search.get("owner") || ""
   const repo = search.get("repo") || ""
   const base = search.get("base") || "main"
@@ -19,7 +24,7 @@ export default function RunDetail({ params }: { params: { id: string } }) {
     const go = async () => {
       setLoading(true)
       setErr("")
-      const r = await fetch(`/api/run?id=${encodeURIComponent(params.id)}&owner=${encodeURIComponent(owner)}&repo=${encodeURIComponent(repo)}&token=${encodeURIComponent(token)}`)
+      const r = await fetch(`/api/run?id=${encodeURIComponent(runId)}&owner=${encodeURIComponent(owner)}&repo=${encodeURIComponent(repo)}&token=${encodeURIComponent(token)}`)
       const j = await r.json()
       if (!r.ok) {
         setErr(j?.error || "Failed")
@@ -32,14 +37,14 @@ export default function RunDetail({ params }: { params: { id: string } }) {
       setLoading(false)
     }
     if (owner && repo) go()
-  }, [params.id, owner, repo, token])
+  }, [runId, owner, repo, token])
 
   const startHeal = async () => {
     setStarting(true)
     const r = await fetch("/api/heal/start", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ owner, repo, base, token, runId: Number(params.id) })
+      body: JSON.stringify({ owner, repo, base, token, runId: Number(runId) })
     })
     const j = await r.json()
     setStarting(false)
@@ -53,7 +58,7 @@ export default function RunDetail({ params }: { params: { id: string } }) {
   return (
     <div style={{ display: "grid", gap: 12 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
-        <h1 style={{ margin: 0, fontSize: 22 }}>Run {params.id}</h1>
+        <h1 style={{ margin: 0, fontSize: 22 }}>Run {runId}</h1>
         <a href={`/runs?owner=${encodeURIComponent(owner)}&repo=${encodeURIComponent(repo)}&base=${encodeURIComponent(base)}&token=${encodeURIComponent(token)}`} style={{ color: "#aab" }}>back</a>
       </div>
 

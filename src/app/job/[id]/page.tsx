@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useMemo, useState } from "react"
+import { useParams, useSearchParams } from "next/navigation"
 
 type Job = {
   id: string
@@ -11,8 +12,12 @@ type Job = {
   logs?: string[]
 }
 
-export default function JobPage({ params }: { params: { id: string } }) {
-  const search = useMemo(() => new URLSearchParams(typeof window !== "undefined" ? window.location.search : ""), [])
+export default function JobPage() {
+  const routeParams = useParams<{ id: string }>()
+  const searchParams = useSearchParams()
+  const search = useMemo(() => new URLSearchParams(searchParams?.toString() || ""), [searchParams])
+  const jobIdParam = routeParams?.id
+  const jobId = Array.isArray(jobIdParam) ? jobIdParam[0] : jobIdParam || ""
   const owner = search.get("owner") || ""
   const repo = search.get("repo") || ""
   const base = search.get("base") || "main"
@@ -23,7 +28,7 @@ export default function JobPage({ params }: { params: { id: string } }) {
   useEffect(() => {
     let t: any
     const poll = async () => {
-      const r = await fetch(`/api/heal/status?jobId=${encodeURIComponent(params.id)}&owner=${encodeURIComponent(owner)}&repo=${encodeURIComponent(repo)}&base=${encodeURIComponent(base)}&token=${encodeURIComponent(token)}`)
+      const r = await fetch(`/api/heal/status?jobId=${encodeURIComponent(jobId)}&owner=${encodeURIComponent(owner)}&repo=${encodeURIComponent(repo)}&base=${encodeURIComponent(base)}&token=${encodeURIComponent(token)}`)
       const j = await r.json()
       if (r.ok) setJob(j.job)
       const done = j?.job?.status === "done" || j?.job?.status === "error"
@@ -31,12 +36,12 @@ export default function JobPage({ params }: { params: { id: string } }) {
     }
     poll()
     return () => clearTimeout(t)
-  }, [params.id, owner, repo, base, token])
+  }, [jobId, owner, repo, base, token])
 
   return (
     <div style={{ display: "grid", gap: 12 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
-        <h1 style={{ margin: 0, fontSize: 22 }}>Job {params.id}</h1>
+        <h1 style={{ margin: 0, fontSize: 22 }}>Job {jobId}</h1>
         <a href={`/runs?owner=${encodeURIComponent(owner)}&repo=${encodeURIComponent(repo)}&base=${encodeURIComponent(base)}&token=${encodeURIComponent(token)}`} style={{ color: "#aab" }}>back</a>
       </div>
 
